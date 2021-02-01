@@ -292,7 +292,8 @@
             modal.removeAttribute('hidden')
 
             const form = document.forms['elasticConfig']
-            form.addEventListener('submit', () => {
+            form.addEventListener('submit', event => {
+                event.preventDefault()
                 console.log('Doing it')
                 const config = {
                     host: form.elements.host.value,
