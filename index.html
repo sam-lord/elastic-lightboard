@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lightboard</title>
+    <style>
+        body {
+            margin: 0;
+            background-color: #e5e9f0;
+            color: #2e3440;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            width: 100%;
+            min-height: 100vh;
+
+            font-family: sans-serif;
+        }
+        .board-border {
+            box-shadow: 0 0 1em 0px rgba(0,0,0,0.75);
+            background-color: #434c5e;
+            border-radius: 2em;
+            width: 95vmin;
+            height: 95vmin;
+            padding: 2em;
+            box-sizing: border-box;
+            position: relative;
+        }
+        .board {
+            border-radius: 1.5em;
+            background-color: #3b4252;
+            width: 100%;
+            height: 100%;
+            box-sizing: border-box;
+            padding: 1em;
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr;
+            grid-template-rows: 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr;
+            grid-gap: 2%;
+            justify-content: space-between;
+            align-content: space-between;
+        }
+        .led {
+            width: 100%;
+            height: 100%;
+            border-radius: 100%;
+            box-sizing: border-box;
+            background-color: #d8dee9;
+        }
+
+        .modal {
+            height: calc(100% - 4em);
+            width: calc(100% - 4em);
+            left: 2em;
+            top: 2em;
+            padding: 2em;
+            background-color: #e5e9f0;
+            position: absolute;
+            border-radius: 1.5em;
+            box-sizing: border-box;
+        }
+
+        .modal input {
+            display: block;
+            width: 100%;
+            height: 2em;
+            margin-above: 0.5em;
+            margin-bottom: 1em;
+            box-sizing: border-box;
+            border-radius: 0.5em;
+            border: 1px solid #d8dee9;
+            padding: 0 0.5em;
+        }
+        .modal input:active, .modal input:focus {
+            border: 1px solid #4c566a;
+        }
+
+        .modal label {
+            margin-top: 1em;
+        }
+    </style>
+</head>
+<body>
+    <div class="board-border">
+        <div class="board">
+        </div>
+        <div class="modal" hidden>
+            <form id="elasticConfig">
+                <label for="host">ElasticSearch host:</label>
+                <input name="host" placeholder="http://localhost:9200">
+                <label for="username">Username:</label>
+                <input name="username" placeholder="elastic">
+                <label for="password">Password:</label>
+                <input name="password" type="password" placeholder="password">
+                <input type="submit" value="Submit">
+            </form>
+        </div>
+    </div>
+    <script>
+        // Lightbox code:
+
+        class Led {
+            constructor(ledElement) {
+                this.element = ledElement
+                this.start = 0
+            }
+
+            get brightness() {
+                return parseFloat(this.element.getAttribute('data-brightness'))
+            }
+
+            set brightness(value) {
+                this.element.setAttribute('data-brightness', value.toString())
+                // TODO: render
+                this.element.style.backgroundImage = `radial-gradient(rgba(191,97,106,${value.toString()}), rgba(191,97,106,${value.toString()}))`
+            }
+        }
+        
+        const leds = []
+        const activeLeds = new Set()
+
+        const init = () => {
+            const board = document.querySelector('.board')
+            for (let i = 0; i < 100; i++) {
+                const led = document.createElement('div')
+                led.classList.add('led')
+                led.setAttribute('data-brightness', '0')
+                board.appendChild(led)
+                leds.push(new Led(led))
+            }
+        }
+
+        const animate = () => {
+            const animationDuration = 500 // animation duration in ms
+            const warmupDuration = 50 // amount of animation which is the warmup in ms
+            const pivot = warmupDuration / animationDuration
+
+            const sinCurve = time => {
+                if (time <= pivot) {
+                    return Math.sin(time / pivot * (Math.PI / 2))
+                } else {
+                    return Math.sin((Math.PI / 2) + ((time - pivot) / (1 - pivot)) * (Math.PI / 2))
+                }
+            }
+
+            const frame = () => {
+                for (let i of activeLeds.values()) {
+                    const currentLed = leds[i]
+                    const timeElapsed = (performance.now() - currentLed.start)
+                    currentLed.brightness = Math.max(sinCurve(timeElapsed / animationDuration), 0)
+                    if (currentLed.brightness === 0) {
+                        activeLeds.delete(i)
+                    }
+                }
+                requestAnimationFrame(frame)
+            }
+            requestAnimationFrame(frame)
+        }
+
+        const activateLed = () => {
+            if (activeLeds.size === 100) {
+                // console.error('No LEDs to light up! More than 100 LEDS per second?')
+                return
+            }
+            let index = Math.floor(Math.random() * (100 - activeLeds.size))
+            const sortedActive = Array.from(activeLeds).sort((a, b) => a - b)
+            for (let x of sortedActive) {
+                if (index >= x) {
+                    index++
+                }
+            }
+            leds[index].start = performance.now()
+            activeLeds.add(index)
+        }
+
+        
+
+        // ElasticSearch code:
+
+        class ElasticSearch {
+            constructor(config) {
+                this.config = config
+            }
+
+            async request(url, method, data) {
+                const headers = {
+                    'Authorization': `Basic ${btoa(`${this.config.username}:${this.config.password}`)}`
+                }
+                if (method && data) {
+                    headers['Content-Type'] = 'application/json'
+                }
+                const response = await fetch(this.config.host + url, {
+                    method: typeof method === 'undefined' ? 'GET' : method,
+                    headers: headers,
+                    body: JSON.stringify(data)
+                })
+                return response.json()
+            }
+
+            async test() {
+                try {
+                    const response = await this.request('/_xpack')
+                } catch (err) {
+                    console.error('Failed to connect to ElasticSearch: ', err)
+                    return false
+                }
+                return true
+            }
+        }
+
+        let events = {}
+
+        const processEvents = () => {
+            const FPS = 60
+            const frameTime = 1000 / FPS
+            
+            setInterval(() => {
+                // Start 10 seconds ago
+                const currentTime = (Date.now() / 1000) - 10
+                const currentTimeStr = Math.floor(currentTime).toString()
+                const numOfEvents = events[currentTimeStr]
+
+                if (typeof numOfEvents !== 'undefined') {
+                    const remainingFrames = Math.max(Math.ceil((1 - (currentTime % 1)) * FPS), 1)
+                    let eventCount = Math.ceil(numOfEvents / remainingFrames)
+                    events[currentTimeStr] = numOfEvents - eventCount
+                    if (numOfEvents - eventCount <= 0) {
+                        // Clean up
+                        delete events[currentTimeStr]
+                    }
+                    if (eventCount > 100) {
+                        eventCount = 100
+                    }
+                    while (eventCount > 0) {
+                        activateLed()
+                        eventCount--
+                    }
+                }
+            }, frameTime)
+        }
+
+        const startElasticMonitoring = (elasticClient) => {
+            console.log('Successfully connected to ElasticSearch!')
+
+            setInterval(async () => {
+                const currentTime = Math.floor(Date.now() / 1000)
+                const response = await elasticClient.request('/filebeat-*/_search', 'POST', {
+                    query: {
+                        bool: {
+                            must: {
+                                range: {
+                                    '@timestamp': {
+                                        gte: currentTime - 10,
+                                        lte: currentTime - 5,
+                                        format: 'epoch_second'
+                                    }
+                                }
+                            },
+                            filter: {
+                                match: {
+                                    'event.module': {
+                                        query: 'nginx'
+                                    }
+                                }
+                            }
+                        }
+                        
+                        
+                    },
+                    _source: [
+                        '@timestamp',
+                        'nginx.access.host'
+                    ],
+                    size: 10000
+                })
+
+                events = response.hits.hits.reduce((acc, hit) => {
+                    const time = Math.floor((new Date(hit['_source']['@timestamp'])).valueOf() / 1000).toString()
+                    if (acc[time]) {
+                        acc[time] += 1
+                    } else {
+                        acc[time] = 1
+                    }
+                    return acc
+                }, events)
+            }, 5000)
+        }
+
+        const promptForConfig = () => {
+            const modal = document.querySelector('.modal')
+            modal.removeAttribute('hidden')
+
+            const form = document.forms['elasticConfig']
+            form.addEventListener('submit', () => {
+                console.log('Doing it')
+                const config = {
+                    host: form.elements.host.value,
+                    username: form.elements.username.value,
+                    password: form.elements.password.value
+                }
+                console.log('Config:', config)
+                localStorage.setItem('elasticConfig', JSON.stringify(config))
+                location.reload()
+            }, false)
+        }
+        
+        const main = async () => {
+            init()
+            animate()
+
+            if (localStorage.getItem('elasticConfig') !== null) {
+                const elasticConfig = JSON.parse(localStorage.getItem('elasticConfig'))
+                const elasticClient = new ElasticSearch(elasticConfig)
+                const success = await elasticClient.test()
+                if (success) {
+                    processEvents()
+                    startElasticMonitoring(elasticClient)
+                } else {
+                    localStorage.clear()
+                    promptForConfig()
+                }
+            } else {
+                promptForConfig()
+            }
+        }
+
+        main()
+    </script>
+</body>
+</html>
